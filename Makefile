@@ -1,9 +1,9 @@
 #
-# lib_uart
+# lib_i2c
 #
 CC      = gcc
 CFLAGS  = -W -Wall -g
-CFLAGS  += -D__LIB_SINGLE_APP__
+CFLAGS  += -D__LIB_I2C_APP__
 
 INCLUDE = -I/usr/local/include
 LDFLAGS = -L/usr/local/lib -lpthread
