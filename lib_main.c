@@ -83,7 +83,7 @@ static void parse_opts (int argc, char *argv[])
 {
     while (1) {
         static const struct option lopts[] = {
-            { "Device",     0, 0, 'D' },
+            { "Device",     1, 0, 'D' },
             { "read_word",  0, 0, 'w' },
             { "read_byte",  0, 0, 'b' },
             { NULL, 0, 0, 0 },
@@ -114,6 +114,12 @@ static void parse_opts (int argc, char *argv[])
         }
     }
 }
+
+//------------------------------------------------------------------------------
+// I2C Detect range (0x03 ~ 0x77)
+//------------------------------------------------------------------------------
+#define I2C_ADDR_START      0x03
+#define I2C_ADDR_END        0x77
 
 //------------------------------------------------------------------------------
 int detect_i2c (int fd)

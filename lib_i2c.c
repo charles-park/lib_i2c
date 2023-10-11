@@ -25,15 +25,17 @@
 #include "lib_i2c.h"
 
 //------------------------------------------------------------------------------------------------------------
+// function prototype
+//------------------------------------------------------------------------------------------------------------
+static inline int i2c_smbus_access (int fd, char rw, uint8_t command, int size, union i2c_smbus_data *data);
+
 int i2c_read        (int fd);
 int i2c_read_byte   (int fd, int reg);
 int i2c_read_word   (int fd, int reg);
-int i2c_read_block  (int fd, int reg, unsigned char *buff, int buff_size);
 int i2c_write       (int fd, int data);
 int i2c_write_byte  (int fd, int reg, int value);
 int i2c_write_word  (int fd, int reg, int value);
-int i2c_write_block (int fd, int reg, unsigned char *buff, int buff_size);
-int i2c_device_check(int fd, int device_addr);
+int i2c_set_addr    (int fd, int device_addr);
 int i2c_open_device (const char *device_node, int device_addr);
 int i2c_close       (int fd);
 int i2c_open        (const char *device_node);
