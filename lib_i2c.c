@@ -106,7 +106,7 @@ static int check_i2c_mode (const char *device_info)
 //------------------------------------------------------------------------------
 static int i2c_set_addr_gpio (int fd, int device_addr)
 {
-    I2C_SLAVE_ADDR = (fd == FD_GPIO_I2C) ? device_addr : 0;
+    I2C_SLAVE_ADDR = (fd == FD_GPIO_I2C) ? (device_addr << 1) : 0;
     return 0;
 }
 
