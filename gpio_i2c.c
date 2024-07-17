@@ -227,7 +227,9 @@ static int gpio_i2c_write (struct i2c_smbus_ioctl_data *args)
     uint16_t i = 0;
     union i2c_smbus_data *pdata = args->data;
 
-   gpio_i2c_start (0);
+    gpio_i2c_stop  ();
+
+    gpio_i2c_start (0);
     if (i2c_write_bits (I2C_SLAVE_ADDR))    goto wr_out;
     if (args->size == 0)    {   i = 1;      goto wr_out;    }
     if (i2c_write_bits (args->command))     goto wr_out;
@@ -251,6 +253,8 @@ static int gpio_i2c_read  (struct i2c_smbus_ioctl_data *args)
 {
     uint16_t i = 0;
     union i2c_smbus_data *pdata = args->data;
+
+    gpio_i2c_stop  ();
 
     gpio_i2c_start (0);
     if (i2c_write_bits (I2C_SLAVE_ADDR))    goto rd_out;
@@ -293,6 +297,7 @@ int gpio_i2c_init (int scl_gpio, int sda_gpio)
     GPIO_I2C_SDA = sda_gpio;
     gpio_direction (GPIO_I2C_SCL, GPIO_DIR_OUT);
     gpio_direction (GPIO_I2C_SDA, GPIO_DIR_OUT);
+    gpio_i2c_stop  ();
 
     return FD_GPIO_I2C;
 }
