@@ -10,7 +10,7 @@ LDFLAGS = -L/usr/local/lib -lpthread
 #
 # 기본적으로 Makefile은 indentation가 TAB 4로 설정되어있음.
 # Indentation이 space인 경우 아래 내용이 활성화 되어야 함.
-.RECIPEPREFIX +=
+# .RECIPEPREFIX +=
 
 # 폴더이름으로 실행파일 생성
 TARGET  := $(notdir $(shell pwd))
