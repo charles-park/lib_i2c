@@ -189,7 +189,7 @@ static int i2c_open_hw (const char *device_info)
     }
     fp_i2c_smbus_access    = i2c_smbus_hw;
     fp_i2c_set_addr        = i2c_set_addr_hw;
-    return 0;
+    return fd;
 }
 
 //------------------------------------------------------------------------------
