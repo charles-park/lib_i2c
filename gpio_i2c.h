@@ -22,9 +22,16 @@
 #include <linux/i2c.h>
 #include <linux/i2c-dev.h>
 
+#define GPIO_I2C_MASK   0xFF00
+#define GPIO_I2C_FLAG   0xFC00
+
+#define IS_GPIO_I2C(x)  (((x & GPIO_I2C_MASK) == GPIO_I2C_FLAG) ? 1 : 0)
+
 //------------------------------------------------------------------------------
-extern int gpio_i2c_init (int scl_gpio, int sda_gpio);
-extern int gpio_i2c_ctrl (struct i2c_smbus_ioctl_data *args);
+extern void     gpio_i2c_close  (int fd);
+extern int      gpio_i2c_saddr  (int fd, int device_addr);
+extern int      gpio_i2c_ctrl   (int fd, struct i2c_smbus_ioctl_data *args);
+extern int      gpio_i2c_open   (const char *device_info);
 
 //------------------------------------------------------------------------------
 #endif  // __GPIO_I2C_H__

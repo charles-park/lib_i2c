@@ -30,16 +30,7 @@
 //------------------------------------------------------------------------------
 // function prototype
 //------------------------------------------------------------------------------
-static void toupperstr          (char *p);
 static int  check_i2c_mode      (const char *device_info);
-
-static int  i2c_set_addr_gpio   (int fd, int device_addr);
-static int  i2c_smbus_gpio      (int fd, char rw, uint8_t command, int size, union i2c_smbus_data *data);
-static int  i2c_open_gpio       (const char *device_info);
-
-static int  i2c_set_addr_hw     (int fd, int device_addr);
-static int  i2c_smbus_hw        (int fd, char rw, uint8_t command, int size, union i2c_smbus_data *data);
-static int  i2c_open_hw         (const char *device_info);
 
 //------------------------------------------------------------------------------
 int i2c_smbus_access(int fd, char rw, uint8_t command, int size, union i2c_smbus_data *data);
@@ -56,35 +47,6 @@ int i2c_open        (const char *device_info);
 int i2c_open_device (const char *device_info, int device_addr);
 
 //------------------------------------------------------------------------------
-int (*fp_i2c_set_addr)      (int fd, int device_addr) = NULL;
-int (*fp_i2c_smbus_access)  (int fd, char rw, uint8_t command, int size, union i2c_smbus_data *data) = NULL;
-
-int  I2C_Mode = eI2C_MODE_HW;
-int  I2C_SLAVE_ADDR = 0;
-
-//------------------------------------------------------------------------------
-//------------------------------------------------------------------------------
-int i2c_smbus_access (int fd, char rw, uint8_t command, int size, union i2c_smbus_data *data)
-{
-    return fp_i2c_smbus_access (fd, rw, command, size, data);
-}
-
-//------------------------------------------------------------------------------
-int i2c_set_addr (int fd, int device_addr)
-{
-    return fp_i2c_set_addr (fd, device_addr);
-}
-
-//------------------------------------------------------------------------------
-//------------------------------------------------------------------------------
-static void toupperstr (char *p)
-{
-	int i, c = strlen(p);
-
-	for (i = 0; i < c; i++, p++)
-		*p = toupper(*p);
-}
-
 //------------------------------------------------------------------------------
 static int check_i2c_mode (const char *device_info)
 {
@@ -93,10 +55,9 @@ static int check_i2c_mode (const char *device_info)
     memset (str, 0, sizeof(str));
     memcpy (str, device_info, sizeof(str)-1);
 
-    toupperstr (str);
-    if (!strncmp ("GPIO", str, sizeof(str)-1))
+    if (!strncmp ("gpio", str, sizeof(str)-1))
         return eI2C_MODE_GPIO;
-    if (!strncmp ("/DEV", str, sizeof(str)-1))
+    if (!strncmp ("/dev", str, sizeof(str)-1))
         return eI2C_MODE_HW;
 
     return -1;
@@ -104,71 +65,21 @@ static int check_i2c_mode (const char *device_info)
 
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
-static int i2c_set_addr_gpio (int fd, int device_addr)
+int i2c_set_addr (int fd, int device_addr)
 {
-    I2C_SLAVE_ADDR = IS_GPIO_I2C(fd) ? (device_addr << 1) : 0;
-    return 0;
-}
-
-//------------------------------------------------------------------------------
-static int i2c_smbus_gpio (int fd, char rw, uint8_t command, int size, union i2c_smbus_data *data)
-{
-    struct i2c_smbus_ioctl_data args ;
-
-    if (!IS_GPIO_I2C(fd))   return -1;
-    args.read_write = rw ;
-    args.command    = command ;
-    args.size       = size ;
-    args.data       = data ;
-    return gpio_i2c_ctrl (&args);
-}
-
-//------------------------------------------------------------------------------
-static int i2c_open_gpio (const char *device_info)
-{
-    char gpio_info [64], *p;
-    int scl_gpio, sda_gpio, i;
-
-    memset (gpio_info, 0, sizeof(gpio_info));
-    memcpy (gpio_info, device_info, strlen (device_info));
-
-    if ((p = strtok (gpio_info, ",")) != NULL) {
-        toupperstr (p);
-        if (strncmp (p, "GPIO", sizeof("GPIO")))   return -1;
-
-        for (i = 0, scl_gpio = 0, sda_gpio = 0; i < 2; i++ ) {
-            p = strtok (NULL, ","); toupperstr (p);
-            if (!strncmp (p, "SCL", sizeof("SCL"))) {
-                p = strtok (NULL, ",");
-                scl_gpio = atoi (p);
-            }
-            else if (!strncmp (p, "SDA", sizeof("SDA"))) {
-                p = strtok (NULL, ",");
-                sda_gpio = atoi (p);
-            }
+    if (IS_GPIO_I2C(fd)) {
+        return gpio_i2c_saddr(fd, device_addr);
+    } else {
+        if (ioctl (fd, I2C_SLAVE, device_addr) < 0) {
+            fprintf (stderr, "Can't setup device : device adddr is 0x%02x\n", device_addr);
+            return -1;
         }
-        if (!scl_gpio || !sda_gpio)     return -1;
-    }
-
-    fp_i2c_smbus_access    = i2c_smbus_gpio;
-    fp_i2c_set_addr        = i2c_set_addr_gpio;
-
-    return gpio_i2c_init (scl_gpio, sda_gpio);
-}
-
-//------------------------------------------------------------------------------
-//------------------------------------------------------------------------------
-static int i2c_set_addr_hw (int fd, int device_addr)
-{
-    if (ioctl (fd, I2C_SLAVE, device_addr) < 0) {
-        fprintf (stderr, "Can't setup device : device adddr is 0x%02x\n", device_addr);
-        return -1;
     }
     return 0;
 }
 
 //------------------------------------------------------------------------------
-static int i2c_smbus_hw (int fd, char rw, uint8_t command, int size, union i2c_smbus_data *data)
+int i2c_smbus_access (int fd, char rw, uint8_t command, int size, union i2c_smbus_data *data)
 {
     struct i2c_smbus_ioctl_data args ;
 
@@ -176,20 +87,9 @@ static int i2c_smbus_hw (int fd, char rw, uint8_t command, int size, union i2c_s
     args.command    = command ;
     args.size       = size ;
     args.data       = data ;
-    return ioctl (fd, I2C_SMBUS, &args) ;
-}
 
-//------------------------------------------------------------------------------
-static int i2c_open_hw (const char *device_info)
-{
-    int fd;
-    if ((fd = open (device_info, O_RDWR)) < 0) {
-        fprintf (stderr, "%s : Unable to open I2C device : %s\n", __func__, device_info);
-        return -1;
-    }
-    fp_i2c_smbus_access    = i2c_smbus_hw;
-    fp_i2c_set_addr        = i2c_set_addr_hw;
-    return fd;
+    if (IS_GPIO_I2C(fd))    return gpio_i2c_ctrl (fd, &args);
+    else                    return ioctl (fd, I2C_SMBUS, &args) ;
 }
 
 //------------------------------------------------------------------------------
@@ -254,15 +154,25 @@ int i2c_write_word (int fd, int reg, int value)
 //------------------------------------------------------------------------------
 int i2c_read_block   (int fd, int command, int size, uint8_t *data)
 {
-    uint8_t reg = command;
     int cnt;
 
-    // command or reg write
-    if (write (fd, (void *)&reg, 1) != 1) {
-        fprintf (stderr, "%s : reg = 0x%02x write error\n", __func__, command);
-        return 0;
-    }
+    if (IS_GPIO_I2C(fd)) {
+        struct i2c_smbus_ioctl_data args ;
 
+        args.read_write = I2C_SMBUS_READ ;
+        args.command    = command ;
+        args.size       = size ;
+        args.data       = (union i2c_smbus_data *)data ;
+        cnt = gpio_i2c_ctrl (fd, &args);
+    } else {
+        uint8_t reg = command;
+
+        // command or reg write
+        if (write (fd, (void *)&reg, 1) != 1) {
+            fprintf (stderr, "%s : reg = 0x%02x write error\n", __func__, command);
+            return 0;
+        }
+    }
     if (size != 0)  cnt = read (fd, data, size);
 
     return cnt;
@@ -271,15 +181,26 @@ int i2c_read_block   (int fd, int command, int size, uint8_t *data)
 //------------------------------------------------------------------------------
 int i2c_write_block  (int fd, int command, int size, uint8_t *data)
 {
-    uint8_t *pbuf = malloc (size +1);
     int cnt;
 
-    if (pbuf != NULL)   pbuf [0] = command;
-    if (size != 0)      memcpy (&pbuf[1], data, size);
+    if (IS_GPIO_I2C(fd)) {
+        struct i2c_smbus_ioctl_data args ;
 
-    cnt = write (fd, (void *)pbuf, (size + 1));
+        args.read_write = I2C_SMBUS_WRITE ;
+        args.command    = command ;
+        args.size       = size ;
+        args.data       = (union i2c_smbus_data *)data ;
+        cnt = gpio_i2c_ctrl (fd, &args);
+    } else {
+        uint8_t *pbuf = malloc (size +1);
 
-    if (pbuf != NULL)   free (pbuf);
+        if (pbuf != NULL)   pbuf [0] = command;
+        if (size != 0)      memcpy (&pbuf[1], data, size);
+
+        cnt = write (fd, (void *)pbuf, (size + 1));
+
+        if (pbuf != NULL)   free (pbuf);
+    }
 
     return cnt;
 }
@@ -288,25 +209,32 @@ int i2c_write_block  (int fd, int command, int size, uint8_t *data)
 //------------------------------------------------------------------------------
 int i2c_close (int fd)
 {
-    if (fd && (I2C_Mode == eI2C_MODE_HW))
+    if (!IS_GPIO_I2C(fd)) {
         close (fd);
+    }
 
     /* gpio i2c slave address clear */
-    I2C_SLAVE_ADDR = 0;
+//    I2C_SLAVE_ADDR = 0;
 
     return 0;
 }
 
 //------------------------------------------------------------------------------
+static int i2c_open_hw (const char *device_info)
+{
+    int fd;
+    if ((fd = open (device_info, O_RDWR)) < 0) {
+        fprintf (stderr, "%s : Unable to open I2C device : %s\n", __func__, device_info);
+        return -1;
+    }
+    return fd;
+}
+
+//------------------------------------------------------------------------------
 int i2c_open (const char *device_info)
 {
-    I2C_Mode = check_i2c_mode (device_info);
-
-    switch (I2C_Mode) {
-        case eI2C_MODE_HW:      return i2c_open_hw   (device_info);
-        case eI2C_MODE_GPIO:    return i2c_open_gpio (device_info);
-        default :               return -1;
-    }
+    return (check_i2c_mode (device_info) == eI2C_MODE_GPIO) ?
+        gpio_i2c_open (device_info) : i2c_open_hw (device_info);
 }
 
 //------------------------------------------------------------------------------

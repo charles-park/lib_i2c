@@ -23,6 +23,8 @@
 #include <time.h>
 #include <fcntl.h>
 
+#include <pthread.h>
+
 #include "lib_i2c.h"
 #include "gpio_i2c.h"
 
@@ -34,30 +36,58 @@
 
 #define I2C_READ_FLAG       0x01
 
+//------------------------------------------------------------------------------
 enum {  LOW = 0, HIGH = 1, };
 
 //------------------------------------------------------------------------------
+volatile unsigned char GPIO_I2C_SLOT = 0;
+
+#define I2C_SLOT_MASK   0x01
+#define I2C_SLOT_MAX    8
+
+struct gpio_i2c_info {
+    int fd;
+    char saddr;
+    int sda;
+    int scl;
+};
+
+pthread_mutex_t mutex_gpio_i2c = PTHREAD_MUTEX_INITIALIZER;
+
+struct gpio_i2c_info    InfoGPIOI2C[I2C_SLOT_MAX];
+
+//------------------------------------------------------------------------------
+//------------------------------------------------------------------------------
 // function prototype
 //------------------------------------------------------------------------------
-static int      gpio_export     (int gpio);
-static int      gpio_direction  (int gpio, int status);
-static int      gpio_set_value  (int gpio, int s_value);
-static int      gpio_get_value  (int gpio, int *g_value);
-static int      gpio_unexport   (int gpio);
-static void     gpio_i2c_start  (int restart);
-static void     gpio_i2c_stop   (void);
-static int      i2c_write_bits  (uint8_t wd);
-static int      i2c_read_bits   (void);
 
-static int gpio_i2c_write (struct i2c_smbus_ioctl_data *args);
-static int gpio_i2c_read  (struct i2c_smbus_ioctl_data *args);
+static void udelay          (int delay);
+static int  gpio_export     (int gpio);
+static int  gpio_direction  (int gpio, int status);
+static int  gpio_set_value  (int gpio, int s_value);
+static int  gpio_get_value  (int gpio, int *g_value);
+static int  gpio_unexport   (int gpio);
+static void gpio_i2c_start  (int restart);
+static void gpio_i2c_stop   (void);
+
+static int  i2c_write_bits  (uint8_t wd);
+static int  i2c_read_bits   (void);
+static int  i2c_set_gpio    (int fd);
+
+static int  gpio_i2c_write  (int fd, struct i2c_smbus_ioctl_data *args);
+static int  gpio_i2c_read   (int fd, struct i2c_smbus_ioctl_data *args);
+static int  find_i2c_slot   (void);
+static int  gpio_i2c_init   (int scl_gpio, int sda_gpio);
 
 //------------------------------------------------------------------------------
-int     gpio_i2c_init   (int scl_gpio, int sda_gpio);
-void    gpio_i2c_close  (void);
-int     gpio_i2c_ctrl   (struct i2c_smbus_ioctl_data *args);
+void    gpio_i2c_close  (int fd);
+int     gpio_i2c_saddr  (int fd, int device_addr);
+int     gpio_i2c_ctrl   (int fd, struct i2c_smbus_ioctl_data *args);
+int     gpio_i2c_open   (const char *device_info);
 
-int GPIO_I2C_SDA = 0, GPIO_I2C_SCL = 0;
+//------------------------------------------------------------------------------
+//------------------------------------------------------------------------------
+int GPIO_I2C_SDA = 0, GPIO_I2C_SCL = 0, GPIO_I2C_SADDR = 0;
 
 //------------------------------------------------------------------------------
 static void udelay (int delay)
@@ -222,15 +252,36 @@ static int i2c_read_bits   (void)
 }
 
 /*---------------------------------------------------------------------------*/
-static int gpio_i2c_write (struct i2c_smbus_ioctl_data *args)
+/*---------------------------------------------------------------------------*/
+static int i2c_set_gpio (int fd)
+{
+    int i;
+    for (i = 0; i < I2C_SLOT_MAX; i++) {
+        if (fd == InfoGPIOI2C[i].fd) {
+            GPIO_I2C_SCL   = InfoGPIOI2C[i].scl;
+            GPIO_I2C_SDA   = InfoGPIOI2C[i].sda;
+            GPIO_I2C_SADDR = InfoGPIOI2C[i].saddr << 1;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/*---------------------------------------------------------------------------*/
+static int gpio_i2c_write (int fd, struct i2c_smbus_ioctl_data *args)
 {
     uint16_t i = 0;
     union i2c_smbus_data *pdata = args->data;
 
+    // Setup I2C GPIO & Slave Addr
+    if (!i2c_set_gpio(fd))  return 0;
+
+    // Mutex on
+    pthread_mutex_lock(&mutex_gpio_i2c);
     gpio_i2c_stop  ();
 
     gpio_i2c_start (0);
-    if (i2c_write_bits (I2C_SLAVE_ADDR))    goto wr_out;
+    if (i2c_write_bits (GPIO_I2C_SADDR))    goto wr_out;
     if (args->size == 0)    {   i = 1;      goto wr_out;    }
     if (i2c_write_bits (args->command))     goto wr_out;
 
@@ -240,8 +291,14 @@ static int gpio_i2c_write (struct i2c_smbus_ioctl_data *args)
 wr_out:
     gpio_i2c_stop  ();
 
+    // Mutex off
+    pthread_mutex_unlock(&mutex_gpio_i2c);
+
 #if defined (_DEBUG_GPIO_I2C_)
-    if (i != size) {
+printf ("%s : addr = 0x%02X, reg = 0x%02X, size = %d\r\n", __func__, GPIO_I2C_SADDR, args->command, args->size);
+printf ("%s : data = 0x%02X, i = %d\r\n", __func__, pdata->block[0], i);
+
+if (i != args->size) {
         printf ("%s(error) : addr = 0x%02X, reg = 0x%02X, size = %d\r\n", addr, reg, size);
     }
 #endif
@@ -249,21 +306,26 @@ wr_out:
 }
 
 //------------------------------------------------------------------------------
-static int gpio_i2c_read  (struct i2c_smbus_ioctl_data *args)
+static int gpio_i2c_read  (int fd, struct i2c_smbus_ioctl_data *args)
 {
     uint16_t i = 0;
     union i2c_smbus_data *pdata = args->data;
 
+    // Setup I2C GPIO & Slave Addr
+    if (!i2c_set_gpio(fd))  return 0;
+
+    // Mutex on
+    pthread_mutex_lock(&mutex_gpio_i2c);
     gpio_i2c_stop  ();
 
     gpio_i2c_start (0);
-    if (i2c_write_bits (I2C_SLAVE_ADDR))    goto rd_out;
+    if (i2c_write_bits (GPIO_I2C_SADDR))    goto rd_out;
     if (args->size == 0)    {   i = 1;      goto rd_out;    }
     if (i2c_write_bits (args->command))     goto rd_out;
 
     // Read
     gpio_i2c_start (1);
-    if (i2c_write_bits (I2C_SLAVE_ADDR | I2C_READ_FLAG))    goto rd_out;
+    if (i2c_write_bits (GPIO_I2C_SADDR | I2C_READ_FLAG))    goto rd_out;
 
     for (i = 0; i < args->size; i++) {
         pdata->block[i] = i2c_read_bits ();
@@ -278,6 +340,8 @@ static int gpio_i2c_read  (struct i2c_smbus_ioctl_data *args)
 rd_out:
     gpio_i2c_stop  ();
 
+    // Mutex off
+    pthread_mutex_unlock(&mutex_gpio_i2c);
 #if defined (_DEBUG_GPIO_I2C_)
     if (i != size) {
         printf ("%s(error) : addr = 0x%02X, reg = 0x%02X, size = %d\r\n", addr, reg, size);
@@ -287,49 +351,124 @@ rd_out:
 }
 
 //------------------------------------------------------------------------------
-//------------------------------------------------------------------------------
-int gpio_i2c_init (int scl_gpio, int sda_gpio)
+static int find_i2c_slot (void)
 {
+    int i;
+    for (i = 0; i < I2C_SLOT_MAX; i++) {
+
+        if (!(GPIO_I2C_SLOT & (I2C_SLOT_MASK << i))) {
+            GPIO_I2C_SLOT |= (I2C_SLOT_MASK) << i;
+            return i;
+        }
+    }
+    return -1;
+}
+
+//------------------------------------------------------------------------------
+static int gpio_i2c_init (int scl_gpio, int sda_gpio)
+{
+    int slot_num = 0;
+
     if (!gpio_export (scl_gpio))    return -1;
     if (!gpio_export (sda_gpio))    return -1;
 
-    GPIO_I2C_SCL = scl_gpio;
-    GPIO_I2C_SDA = sda_gpio;
-    gpio_direction (GPIO_I2C_SCL, GPIO_DIR_OUT);
-    gpio_direction (GPIO_I2C_SDA, GPIO_DIR_OUT);
+    if ((slot_num = find_i2c_slot()) != -1) {
+        InfoGPIOI2C[slot_num].fd    = (slot_num | GPIO_I2C_FLAG);
+        InfoGPIOI2C[slot_num].scl   = scl_gpio;
+        InfoGPIOI2C[slot_num].sda   = sda_gpio;
+        InfoGPIOI2C[slot_num].saddr = -1;
+    }
+    else    return -1;
+
+    gpio_direction (InfoGPIOI2C[slot_num].scl, GPIO_DIR_OUT);
+    gpio_direction (InfoGPIOI2C[slot_num].sda, GPIO_DIR_OUT);
+
+    i2c_set_gpio(InfoGPIOI2C[slot_num].fd);
+
     gpio_i2c_stop  ();
 
-    return FD_GPIO_I2C;
+    return  InfoGPIOI2C[slot_num].fd;
 }
 
 //------------------------------------------------------------------------------
-void gpio_i2c_close (void)
+void gpio_i2c_close (int fd)
 {
-    if (GPIO_I2C_SCL)   gpio_unexport (GPIO_I2C_SCL);
-    if (GPIO_I2C_SDA)   gpio_unexport (GPIO_I2C_SDA);
-    I2C_SLAVE_ADDR = 0;
+    int i;
+    GPIO_I2C_SDA = 0, GPIO_I2C_SCL = 0, GPIO_I2C_SADDR = 0;
+
+    for (i = 0; i < I2C_SLOT_MAX; i++) {
+        if (InfoGPIOI2C[i].fd == fd) {
+            InfoGPIOI2C[i].fd   = 0;
+            InfoGPIOI2C[i].scl  = 0;
+            InfoGPIOI2C[i].sda  = 0;
+            InfoGPIOI2C[i].saddr= 0;
+            // Slot empty
+            GPIO_I2C_SLOT &= ~(I2C_SLOT_MASK << i);
+        }
+    }
 }
 
 //------------------------------------------------------------------------------
-int gpio_i2c_ctrl (struct i2c_smbus_ioctl_data *args)
+int gpio_i2c_saddr (int fd, int device_addr)
+{
+    int i;
+    for (i = 0; i < I2C_SLOT_MAX; i++) {
+        if (fd == InfoGPIOI2C[i].fd)    {
+            InfoGPIOI2C[i].saddr = device_addr;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+//------------------------------------------------------------------------------
+int gpio_i2c_ctrl (int fd, struct i2c_smbus_ioctl_data *args)
 {
     int ret = 0;
 
-    if (!I2C_SLAVE_ADDR || (I2C_Mode != eI2C_MODE_GPIO))
-        return -1;
+    if (!IS_GPIO_I2C(fd))   return -1;
 
     switch (args->size) {
-        case I2C_SMBUS_BYTE:        args->size = 0;     break;
-        case I2C_SMBUS_BYTE_DATA:   args->size = 1;     break;
-        case I2C_SMBUS_WORD_DATA:   args->size = 2;     break;
-        default :
-            return -1;
-    }
+        case I2C_SMBUS_BYTE:        args->size  = 0;    break;
+        case I2C_SMBUS_BYTE_DATA:   args->size  = 1;    break;
+        case I2C_SMBUS_WORD_DATA:   args->size  = 2;    break;
+//        default:                    args->size -= 1;    break;
+        default:                    break;
+}
 
-    ret = args->read_write ? gpio_i2c_read (args) : gpio_i2c_write (args);
+    ret = args->read_write ? gpio_i2c_read (fd, args) : gpio_i2c_write (fd, args);
 
     return ret ? 0 : -1;
 }
+
+//------------------------------------------------------------------------------
+int gpio_i2c_open (const char *device_info)
+{
+    char gpio_info [64], *p;
+    int scl_gpio, sda_gpio, i;
+
+    memset (gpio_info, 0, sizeof(gpio_info));
+    memcpy (gpio_info, device_info, strlen (device_info));
+
+    if ((p = strtok (gpio_info, ",")) != NULL) {
+        if (strncmp (p, "gpio", sizeof("gpio")))   return -1;
+
+        for (i = 0, scl_gpio = 0, sda_gpio = 0; i < 2; i++ ) {
+            p = strtok (NULL, ",");
+            if (!strncmp (p, "scl", sizeof("scl"))) {
+                p = strtok (NULL, ",");
+                scl_gpio = atoi (p);
+            }
+            else if (!strncmp (p, "sda", sizeof("sda"))) {
+                p = strtok (NULL, ",");
+                sda_gpio = atoi (p);
+            }
+        }
+        if (!scl_gpio || !sda_gpio)     return -1;
+    }
+    return gpio_i2c_init (scl_gpio, sda_gpio);
+}
+
 
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
