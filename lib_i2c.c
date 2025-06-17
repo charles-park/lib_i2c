@@ -106,7 +106,7 @@ static int check_i2c_mode (const char *device_info)
 //------------------------------------------------------------------------------
 static int i2c_set_addr_gpio (int fd, int device_addr)
 {
-    I2C_SLAVE_ADDR = (fd == FD_GPIO_I2C) ? (device_addr << 1) : 0;
+    I2C_SLAVE_ADDR = IS_GPIO_I2C(fd) ? (device_addr << 1) : 0;
     return 0;
 }
 
@@ -115,7 +115,7 @@ static int i2c_smbus_gpio (int fd, char rw, uint8_t command, int size, union i2c
 {
     struct i2c_smbus_ioctl_data args ;
 
-    if (fd != FD_GPIO_I2C)  return -1;
+    if (!IS_GPIO_I2C(fd))   return -1;
     args.read_write = rw ;
     args.command    = command ;
     args.size       = size ;
@@ -250,6 +250,41 @@ int i2c_write_word (int fd, int reg, int value)
     return i2c_smbus_access (fd, I2C_SMBUS_WRITE, reg, I2C_SMBUS_WORD_DATA, &data) ;
 }
 
+//------------------------------------------------------------------------------
+//------------------------------------------------------------------------------
+int i2c_read_block   (int fd, int command, int size, uint8_t *data)
+{
+    uint8_t reg = command;
+    int cnt;
+
+    // command or reg write
+    if (write (fd, (void *)&reg, 1) != 1) {
+        fprintf (stderr, "%s : reg = 0x%02x write error\n", __func__, command);
+        return 0;
+    }
+
+    if (size != 0)  cnt = read (fd, data, size);
+
+    return cnt;
+}
+
+//------------------------------------------------------------------------------
+int i2c_write_block  (int fd, int command, int size, uint8_t *data)
+{
+    uint8_t *pbuf = malloc (size +1);
+    int cnt;
+
+    if (pbuf != NULL)   pbuf [0] = command;
+    if (size != 0)      memcpy (&pbuf[1], data, size);
+
+    cnt = write (fd, (void *)pbuf, (size + 1));
+
+    if (pbuf != NULL)   free (pbuf);
+
+    return cnt;
+}
+
+//------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
 int i2c_close (int fd)
 {
