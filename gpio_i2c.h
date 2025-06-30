@@ -28,6 +28,10 @@
 #define IS_GPIO_I2C(x)  (((x & GPIO_I2C_MASK) == GPIO_I2C_FLAG) ? 1 : 0)
 
 //------------------------------------------------------------------------------
+extern int      read_gpio_i2c   (int fd, void *pbuf, int size);
+extern int      write_gpio_i2c  (int fd, void *pbuf, int size);
+
+//------------------------------------------------------------------------------
 extern void     gpio_i2c_close  (int fd);
 extern int      gpio_i2c_saddr  (int fd, int device_addr);
 extern int      gpio_i2c_ctrl   (int fd, struct i2c_smbus_ioctl_data *args);

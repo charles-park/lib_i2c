@@ -29,11 +29,15 @@ enum {
     eI2C_MODE_END
 };
 
+// I2C Block r/w options
+#define I2C_REG_NONE    0x10000
+#define I2C_REG_16BITS  0x20000
+
 //------------------------------------------------------------------------------
 // i2c raw command
 //------------------------------------------------------------------------------
-extern int i2c_read_block   (int fd, int command, int size, uint8_t *data);
-extern int i2c_write_block  (int fd, int command, int size, uint8_t *data);
+extern int i2c_read_block   (int fd, int reg, int size, void *data);
+extern int i2c_write_block  (int fd, int reg, int size, void *data);
 
 //------------------------------------------------------------------------------
 extern int i2c_smbus_access (int fd, char rw, uint8_t command, int size, union i2c_smbus_data *data);

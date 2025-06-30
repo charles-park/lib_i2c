@@ -442,6 +442,83 @@ int gpio_i2c_ctrl (int fd, struct i2c_smbus_ioctl_data *args)
 }
 
 //------------------------------------------------------------------------------
+// I2C GPIO Block read
+//------------------------------------------------------------------------------
+int read_gpio_i2c (int fd, void *pbuf, int size)
+{
+    uint16_t i = 0;
+    uint8_t *p = (uint8_t *)pbuf;
+
+    // Setup I2C GPIO & Slave Addr
+    if (!i2c_set_gpio(fd))  return 0;
+
+    // Mutex on
+    pthread_mutex_lock(&mutex_gpio_i2c);
+    gpio_i2c_stop  ();
+
+    gpio_i2c_start (0);
+    printf ("%s : %d, %x\n", __func__, __LINE__, GPIO_I2C_SADDR)    ;
+    if (i2c_write_bits (GPIO_I2C_SADDR | I2C_READ_FLAG))    goto rd_out;
+
+    printf ("%s : %d\n", __func__, __LINE__)    ;
+    for (i = 0; i < size; i++) {
+        p [i] = i2c_read_bits ();
+        // ack send except last byte.
+        printf ("%s : %d\n", __func__, __LINE__)    ;
+        if (i < (size -1)) {
+            gpio_set_value (GPIO_I2C_SDA, LOW);     udelay(GPIO_SET_DELAY);
+            gpio_set_value (GPIO_I2C_SCL, HIGH);    udelay(GPIO_SET_DELAY);
+            gpio_set_value (GPIO_I2C_SCL, LOW);     udelay(GPIO_SET_DELAY);
+            gpio_set_value (GPIO_I2C_SDA, HIGH);    udelay(GPIO_SET_DELAY);
+        }
+    }
+rd_out:
+    gpio_i2c_stop  ();
+
+    // Mutex off
+    pthread_mutex_unlock(&mutex_gpio_i2c);
+    return i;
+}
+
+//------------------------------------------------------------------------------
+// I2C GPIO Block write
+//------------------------------------------------------------------------------
+int write_gpio_i2c(int fd, void *pbuf, int size)
+{
+    uint16_t i = 0;
+    uint8_t *p = (uint8_t *)pbuf;
+
+    // Setup I2C GPIO & Slave Addr
+    if (!i2c_set_gpio(fd))  return 0;
+
+    // Mutex on
+    pthread_mutex_lock(&mutex_gpio_i2c);
+    gpio_i2c_stop  ();
+
+    gpio_i2c_start (0);
+printf ("%s : %d, %x\n", __func__, __LINE__, GPIO_I2C_SADDR)    ;
+{
+    int j;
+    for (j = 0; j < size; j++)
+        printf ("buf[%d] = %x\n", j, p [j]);
+}
+    if (i2c_write_bits (GPIO_I2C_SADDR))    goto wr_out;
+
+printf ("%s : %d, %x\n", __func__, __LINE__, GPIO_I2C_SADDR)    ;
+    for (i = 0; i < size; i++)
+        if (i2c_write_bits (p [i])) goto wr_out;
+
+wr_out:
+    gpio_i2c_stop  ();
+
+    // Mutex off
+    pthread_mutex_unlock(&mutex_gpio_i2c);
+
+printf ("%s : %d %d\n", __func__, size, i);
+    return i;
+}
+
+//------------------------------------------------------------------------------
 int gpio_i2c_open (const char *device_info)
 {
     char gpio_info [64], *p;
