@@ -294,14 +294,6 @@ wr_out:
     // Mutex off
     pthread_mutex_unlock(&mutex_gpio_i2c);
 
-#if defined (_DEBUG_GPIO_I2C_)
-printf ("%s : addr = 0x%02X, reg = 0x%02X, size = %d\r\n", __func__, GPIO_I2C_SADDR, args->command, args->size);
-printf ("%s : data = 0x%02X, i = %d\r\n", __func__, pdata->block[0], i);
-
-if (i != args->size) {
-        printf ("%s(error) : addr = 0x%02X, reg = 0x%02X, size = %d\r\n", addr, reg, size);
-    }
-#endif
     return i;
 }
 
@@ -342,11 +334,6 @@ rd_out:
 
     // Mutex off
     pthread_mutex_unlock(&mutex_gpio_i2c);
-#if defined (_DEBUG_GPIO_I2C_)
-    if (i != size) {
-        printf ("%s(error) : addr = 0x%02X, reg = 0x%02X, size = %d\r\n", addr, reg, size);
-    }
-#endif
     return i;
 }
 
@@ -432,7 +419,6 @@ int gpio_i2c_ctrl (int fd, struct i2c_smbus_ioctl_data *args)
         case I2C_SMBUS_BYTE:        args->size  = 0;    break;
         case I2C_SMBUS_BYTE_DATA:   args->size  = 1;    break;
         case I2C_SMBUS_WORD_DATA:   args->size  = 2;    break;
-//        default:                    args->size -= 1;    break;
         default:                    break;
 }
 
@@ -457,14 +443,11 @@ int read_gpio_i2c (int fd, void *pbuf, int size)
     gpio_i2c_stop  ();
 
     gpio_i2c_start (0);
-    printf ("%s : %d, %x\n", __func__, __LINE__, GPIO_I2C_SADDR)    ;
     if (i2c_write_bits (GPIO_I2C_SADDR | I2C_READ_FLAG))    goto rd_out;
 
-    printf ("%s : %d\n", __func__, __LINE__)    ;
     for (i = 0; i < size; i++) {
         p [i] = i2c_read_bits ();
         // ack send except last byte.
-        printf ("%s : %d\n", __func__, __LINE__)    ;
         if (i < (size -1)) {
             gpio_set_value (GPIO_I2C_SDA, LOW);     udelay(GPIO_SET_DELAY);
             gpio_set_value (GPIO_I2C_SCL, HIGH);    udelay(GPIO_SET_DELAY);
@@ -496,15 +479,8 @@ int write_gpio_i2c(int fd, void *pbuf, int size)
     gpio_i2c_stop  ();
 
     gpio_i2c_start (0);
-printf ("%s : %d, %x\n", __func__, __LINE__, GPIO_I2C_SADDR)    ;
-{
-    int j;
-    for (j = 0; j < size; j++)
-        printf ("buf[%d] = %x\n", j, p [j]);
-}
     if (i2c_write_bits (GPIO_I2C_SADDR))    goto wr_out;
 
-printf ("%s : %d, %x\n", __func__, __LINE__, GPIO_I2C_SADDR)    ;
     for (i = 0; i < size; i++)
         if (i2c_write_bits (p [i])) goto wr_out;
 
@@ -514,7 +490,6 @@ wr_out:
     // Mutex off
     pthread_mutex_unlock(&mutex_gpio_i2c);
 
-printf ("%s : %d %d\n", __func__, size, i);
     return i;
 }
 

@@ -215,7 +215,6 @@ int i2c_write_block  (int fd, int reg, int size, void *data)
             cnt = write           (fd, (void *)pbuf, size + offset);
 
         free (pbuf);
-printf ("%s : %d %d\n", __func__, cnt, offset);
         return cnt;
     }
     return 0;
